@@ -112,6 +112,7 @@ if (userCount.count === 0) {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1); // Trust first proxy (required for rate limiting behind nginx)
   const httpServer = createServer(app);
   const io = new Server(httpServer);
   const PORT = 3000;

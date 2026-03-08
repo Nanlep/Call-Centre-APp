@@ -193,13 +193,25 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
   const [isMuted, setIsMuted] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [duration, setDuration] = useState(0);
+  
+  // Refs for long press
+  const longPressTimer = useRef<any>(null);
+  const isLongPress = useRef(false);
+  // Ref for duration to access in callbacks
+  const durationRef = useRef(0);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (activeCall) {
-      interval = setInterval(() => setDuration(d => d + 1), 1000);
+      interval = setInterval(() => {
+        setDuration(d => {
+            durationRef.current = d + 1;
+            return d + 1;
+        });
+      }, 1000);
     } else {
       setDuration(0);
+      durationRef.current = 0;
     }
     return () => clearInterval(interval);
   }, [activeCall]);
@@ -229,7 +241,7 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
         api.logCall({
           contact_id: contact?.id,
           direction: 'outbound',
-          duration: duration, 
+          duration: durationRef.current, 
           status: 'completed'
         });
       });
@@ -259,6 +271,34 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
     }
   };
 
+  // Long press handlers
+  const handleMouseDown = () => {
+    if (activeCall) return;
+    isLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      setNumber(prev => prev + '+');
+    }, 500);
+  };
+
+  const handleMouseUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handleClick = (key: string | number) => {
+    if (activeCall) return;
+    if (key === 0) {
+      if (isLongPress.current) {
+        isLongPress.current = false;
+        return;
+      }
+    }
+    setNumber(prev => prev + key);
+  };
+
   return (
     <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800 w-full max-w-sm">
       <div className="flex justify-between items-center mb-6">
@@ -282,11 +322,17 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
         {[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map((key) => (
           <button
             key={key}
-            onClick={() => !activeCall && setNumber(prev => prev + key)}
-            className="h-14 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 font-medium text-xl transition-colors active:scale-95"
+            onMouseDown={key === 0 ? handleMouseDown : undefined}
+            onMouseUp={key === 0 ? handleMouseUp : undefined}
+            onMouseLeave={key === 0 ? handleMouseUp : undefined}
+            onTouchStart={key === 0 ? handleMouseDown : undefined}
+            onTouchEnd={key === 0 ? handleMouseUp : undefined}
+            onClick={() => handleClick(key)}
+            className={`h-14 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 font-medium text-xl transition-colors active:scale-95 flex flex-col items-center justify-center ${key === 0 ? 'leading-none' : ''}`}
             disabled={!!activeCall}
           >
             {key}
+            {key === 0 && <span className="text-[10px] text-zinc-500 font-normal">+</span>}
           </button>
         ))}
       </div>
