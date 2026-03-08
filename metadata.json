@@ -1,0 +1,5 @@
+{
+  "name": "Twilio Call Center",
+  "description": "A comprehensive call center application for inbound/outbound campaigns, customer support, and billing services using Twilio API.",
+  "requestFramePermissions": ["microphone"]
+}
