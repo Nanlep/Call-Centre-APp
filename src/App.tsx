@@ -1,21 +1,144 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid } from 'lucide-react';
-import { api, socket, Contact, Campaign, CallLog } from './services';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail } from 'lucide-react';
+import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
 
-// --- Components ---
+// --- Auth Components ---
 
-const Sidebar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (t: string) => void }) => (
+const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      let res;
+      if (isRegister) {
+        res = await api.register({ email, password, name });
+      } else {
+        res = await api.login({ email, password });
+      }
+      localStorage.setItem('token', res.token);
+      onLogin(res.user);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl">
+        <div className="flex justify-center mb-8">
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <Phone className="text-white w-8 h-8" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-bold text-white text-center mb-2">Meti Call Center</h1>
+        <p className="text-zinc-400 text-center mb-8">
+          {isRegister ? 'Create your enterprise account' : 'Sign in to your dashboard'}
+        </p>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-sm mb-6 text-center">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {isRegister && (
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                  placeholder="John Doe"
+                  required
+                />
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1">Email Address</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="name@company.com"
+                required
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1">Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed mt-6"
+          >
+            {loading ? 'Processing...' : (isRegister ? 'Create Account' : 'Sign In')}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={() => setIsRegister(!isRegister)}
+            className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Register"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- App Components ---
+
+const Sidebar = ({ activeTab, setActiveTab, onLogout }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void }) => (
   <div className="w-16 bg-zinc-900 flex flex-col items-center py-6 gap-6 border-r border-zinc-800">
-    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4">
+    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
       <Phone className="text-white w-6 h-6" />
     </div>
     <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
     <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
     <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-    <div className="mt-auto">
+    <div className="mt-auto flex flex-col gap-4">
       <NavIcon icon={<Settings />} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+      <button
+        onClick={onLogout}
+        className="p-3 rounded-xl text-zinc-500 hover:text-red-400 hover:bg-zinc-800/50 transition-all"
+      >
+        <LogOut size={20} />
+      </button>
     </div>
   </div>
 );
@@ -23,7 +146,7 @@ const Sidebar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab:
 const NavIcon = ({ icon, active, onClick }: { icon: React.ReactNode, active: boolean, onClick: () => void }) => (
   <button
     onClick={onClick}
-    className={`p-3 rounded-xl transition-all ${active ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+    className={`p-3 rounded-xl transition-all ${active ? 'bg-zinc-800 text-white shadow-inner' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
   >
     {React.cloneElement(icon as React.ReactElement, { size: 20 })}
   </button>
@@ -70,7 +193,7 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
         api.logCall({
           contact_id: contact?.id,
           direction: 'outbound',
-          duration: duration, // Note: this will be 0 if captured here immediately, better to capture ref or use end time
+          duration: duration, 
           status: 'completed'
         });
       });
@@ -162,11 +285,11 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
   );
 };
 
-const Dashboard = ({ campaigns, contacts, onCallContact }: { campaigns: Campaign[], contacts: Contact[], onCallContact: (phone: string) => void }) => (
+const Dashboard = ({ campaigns, contacts, onCallContact, user }: { campaigns: Campaign[], contacts: Contact[], onCallContact: (phone: string) => void, user: UserType }) => (
   <div className="p-8 h-full overflow-y-auto">
     <header className="mb-8">
       <h1 className="text-3xl font-semibold text-zinc-100 mb-2">Agent Dashboard</h1>
-      <p className="text-zinc-400">Welcome back, Agent 1. You have {campaigns.length} active campaigns.</p>
+      <p className="text-zinc-400">Welcome back, {user.name}. You have {campaigns.length} active campaigns.</p>
     </header>
 
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -237,6 +360,7 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
         <thead className="bg-zinc-950/50 text-zinc-400 text-xs uppercase font-medium">
           <tr>
             <th className="px-6 py-4">Contact</th>
+            <th className="px-6 py-4">Agent</th>
             <th className="px-6 py-4">Direction</th>
             <th className="px-6 py-4">Duration</th>
             <th className="px-6 py-4">Status</th>
@@ -248,6 +372,9 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
             <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
               <td className="px-6 py-4">
                 <div className="font-medium text-zinc-200">{log.contact_name || 'Unknown'}</div>
+              </td>
+              <td className="px-6 py-4">
+                <div className="text-zinc-400 text-sm">{log.agent_name || 'System'}</div>
               </td>
               <td className="px-6 py-4">
                 <span className={`flex items-center gap-2 text-sm ${log.direction === 'inbound' ? 'text-blue-400' : 'text-purple-400'}`}>
@@ -276,6 +403,8 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
 // --- Main App ---
 
 export default function App() {
+  const [user, setUser] = useState<UserType | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [device, setDevice] = useState<Device | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
@@ -285,8 +414,25 @@ export default function App() {
   const [isReady, setIsReady] = useState(false);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
 
-  // Initialize Data
+  // Check Auth
   useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { user } = await api.getMe();
+        setUser(user);
+      } catch (e) {
+        // Not logged in
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  // Initialize Data (Only when logged in)
+  useEffect(() => {
+    if (!user) return;
+
     const fetchData = async () => {
       try {
         const [c, camp, l] = await Promise.all([
@@ -311,10 +457,12 @@ export default function App() {
     return () => {
       socket.off('log_update');
     };
-  }, []);
+  }, [user]);
 
-  // Initialize Twilio
+  // Initialize Twilio (Only when logged in)
   useEffect(() => {
+    if (!user) return;
+
     const initTwilio = async () => {
       try {
         const { token } = await api.getToken();
@@ -353,7 +501,7 @@ export default function App() {
         device.destroy();
       }
     };
-  }, []);
+  }, [user]);
 
   const handleAcceptIncoming = () => {
     if (incomingCall) {
@@ -370,9 +518,24 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    await api.logout();
+    setUser(null);
+    setDevice(null);
+    setIsReady(false);
+  };
+
+  if (loading) {
+    return <div className="h-screen bg-black flex items-center justify-center text-zinc-500">Loading Meti Call Center...</div>;
+  }
+
+  if (!user) {
+    return <AuthPage onLogin={setUser} />;
+  }
+
   return (
     <div className="flex h-screen bg-black text-zinc-100 font-sans overflow-hidden">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
       
       <main className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative">
@@ -381,17 +544,34 @@ export default function App() {
               campaigns={campaigns} 
               contacts={contacts} 
               onCallContact={(phone) => {
-                // In a real app, this would pre-fill the dialer or auto-dial
-                // For now, we'll just switch to dialer view contextually if we had one
                 console.log("Calling", phone);
-              }} 
+              }}
+              user={user}
             />
           )}
-          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} />}
+          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} user={user} />}
           {activeTab === 'history' && <CallHistory logs={logs} />}
           {activeTab === 'settings' && (
             <div className="p-8">
               <h1 className="text-3xl font-semibold mb-4">Settings</h1>
+              <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 mb-6">
+                <h3 className="text-lg font-medium mb-4">Profile</h3>
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 bg-indigo-600 rounded-full flex items-center justify-center text-xl font-bold">
+                    {user.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="font-medium">{user.name}</div>
+                    <div className="text-zinc-500 text-sm">{user.email}</div>
+                  </div>
+                  <div className="ml-auto">
+                    <span className="px-3 py-1 bg-zinc-800 rounded-full text-xs uppercase tracking-wider text-zinc-400">
+                      {user.role}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800">
                 <h3 className="text-lg font-medium mb-2">Twilio Status</h3>
                 <div className="flex items-center gap-2">
@@ -419,7 +599,7 @@ export default function App() {
             <div className="space-y-3">
               <div className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 cursor-pointer hover:bg-zinc-700 transition-colors">
                 <span className="block text-xs text-zinc-500 mb-1">Greeting</span>
-                "Hello, this is Agent 1 from [Company]. How can I help you today?"
+                "Hello, this is {user.name} from [Company]. How can I help you today?"
               </div>
               <div className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 cursor-pointer hover:bg-zinc-700 transition-colors">
                 <span className="block text-xs text-zinc-500 mb-1">Billing Inquiry</span>
