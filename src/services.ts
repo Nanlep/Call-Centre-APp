@@ -7,6 +7,9 @@ export interface User {
   email: string;
   name: string;
   role: 'admin' | 'agent';
+  company_id?: number;
+  company_name?: string;
+  created_at?: string;
 }
 
 export interface Contact {
@@ -16,6 +19,7 @@ export interface Contact {
   email: string;
   type: 'customer' | 'lead';
   notes: string;
+  company_id?: number;
 }
 
 export interface Campaign {
@@ -23,6 +27,7 @@ export interface Campaign {
   name: string;
   type: 'inbound' | 'outbound';
   status: 'active' | 'paused' | 'completed';
+  company_id?: number;
 }
 
 export interface CallLog {
@@ -42,7 +47,12 @@ export const socket: Socket = io();
 // Helper to get token
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
+  return token ? { 
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  } : {
+    'Content-Type': 'application/json'
+  };
 };
 
 export const api = {
@@ -53,7 +63,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error((await res.json()).error || 'Registration failed');
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Registration failed');
+    }
     return res.json();
   },
   login: async (data: any) => {
@@ -62,7 +75,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error((await res.json()).error || 'Login failed');
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Login failed');
+    }
     return res.json();
   },
   logout: async () => {
@@ -74,6 +90,25 @@ export const api = {
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error('Not authenticated');
+    return res.json();
+  },
+
+  // Team Management
+  getTeam: async (): Promise<User[]> => {
+    const res = await fetch('/api/team', { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch team');
+    return res.json();
+  },
+  addTeamMember: async (data: any) => {
+    const res = await fetch('/api/team', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Failed to add team member');
+    }
     return res.json();
   },
 
@@ -101,10 +136,7 @@ export const api = {
   logCall: async (data: Partial<CallLog>) => {
     await fetch('/api/logs', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        ...getAuthHeaders() 
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
   },

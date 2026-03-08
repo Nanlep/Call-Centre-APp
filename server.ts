@@ -24,8 +24,61 @@ const JWT_SECRET = process.env.JWT_SECRET || "meti-call-center-secret-key-change
 const db = new Database("call_center.db");
 db.pragma("journal_mode = WAL");
 
-// ... (Database Schema and Seeding remains the same) ...
-// Initialize Schema
+// --- Migrations & Schema ---
+const runMigrations = () => {
+  try {
+    // 1. Create Companies Table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 2. Add company_id to users
+    try {
+      db.prepare("SELECT company_id FROM users LIMIT 1").get();
+    } catch (e) {
+      console.log("Migrating users table...");
+      db.exec("ALTER TABLE users ADD COLUMN company_id INTEGER REFERENCES companies(id)");
+      // Create default company for existing users
+      const defaultCompany = db.prepare("INSERT INTO companies (name) VALUES (?)").run("Default Company");
+      db.prepare("UPDATE users SET company_id = ? WHERE company_id IS NULL").run(defaultCompany.lastInsertRowid);
+    }
+
+    // 3. Add company_id to contacts
+    try {
+      db.prepare("SELECT company_id FROM contacts LIMIT 1").get();
+    } catch (e) {
+      console.log("Migrating contacts table...");
+      db.exec("ALTER TABLE contacts ADD COLUMN company_id INTEGER REFERENCES companies(id)");
+      const defaultCompanyId = db.prepare("SELECT id FROM companies LIMIT 1").get() as { id: number };
+      if (defaultCompanyId) {
+        db.prepare("UPDATE contacts SET company_id = ? WHERE company_id IS NULL").run(defaultCompanyId.id);
+      }
+    }
+
+    // 4. Add company_id to campaigns
+    try {
+      db.prepare("SELECT company_id FROM campaigns LIMIT 1").get();
+    } catch (e) {
+      console.log("Migrating campaigns table...");
+      db.exec("ALTER TABLE campaigns ADD COLUMN company_id INTEGER REFERENCES companies(id)");
+      const defaultCompanyId = db.prepare("SELECT id FROM companies LIMIT 1").get() as { id: number };
+      if (defaultCompanyId) {
+        db.prepare("UPDATE campaigns SET company_id = ? WHERE company_id IS NULL").run(defaultCompanyId.id);
+      }
+    }
+
+  } catch (err) {
+    console.error("Migration error:", err);
+  }
+};
+
+runMigrations();
+
+// Initialize Schema (Base tables)
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +86,8 @@ db.exec(`
     password TEXT NOT NULL,
     name TEXT NOT NULL,
     role TEXT DEFAULT 'agent', -- admin, agent
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    company_id INTEGER REFERENCES companies(id)
   );
 
   CREATE TABLE IF NOT EXISTS user_integrations (
@@ -54,14 +108,16 @@ db.exec(`
     email TEXT,
     type TEXT DEFAULT 'customer', -- customer, lead
     notes TEXT,
-    source TEXT DEFAULT 'manual' -- manual, google, hubspot, salesforce
+    source TEXT DEFAULT 'manual', -- manual, google, hubspot, salesforce
+    company_id INTEGER REFERENCES companies(id)
   );
 
   CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT NOT NULL, -- inbound, outbound
-    status TEXT DEFAULT 'active'
+    status TEXT DEFAULT 'active',
+    company_id INTEGER REFERENCES companies(id)
   );
 
   CREATE TABLE IF NOT EXISTS campaign_contacts (
@@ -88,14 +144,25 @@ db.exec(`
 // Seed Data if empty
 const contactCount = db.prepare("SELECT count(*) as count FROM contacts").get() as { count: number };
 if (contactCount.count === 0) {
-  const insertContact = db.prepare("INSERT INTO contacts (name, phone, email, type, notes) VALUES (?, ?, ?, ?, ?)");
-  insertContact.run("Alice Johnson", "+15550101", "alice@example.com", "customer", "Premium plan user");
-  insertContact.run("Bob Smith", "+15550102", "bob@example.com", "lead", "Interested in billing support");
-  insertContact.run("Charlie Brown", "+15550103", "charlie@example.com", "customer", "Reported outage last week");
+  // Create a default company and admin if not exists
+  let companyId: number | bigint = 1;
+  const existingCompany = db.prepare("SELECT id FROM companies LIMIT 1").get() as { id: number };
+  
+  if (!existingCompany) {
+    const info = db.prepare("INSERT INTO companies (name) VALUES (?)").run("Meti Demo Corp");
+    companyId = info.lastInsertRowid;
+  } else {
+    companyId = existingCompany.id;
+  }
 
-  const insertCampaign = db.prepare("INSERT INTO campaigns (name, type) VALUES (?, ?)");
-  insertCampaign.run("Q1 Sales Outreach", "outbound");
-  insertCampaign.run("Support Queue A", "inbound");
+  const insertContact = db.prepare("INSERT INTO contacts (name, phone, email, type, notes, company_id) VALUES (?, ?, ?, ?, ?, ?)");
+  insertContact.run("Alice Johnson", "+15550101", "alice@example.com", "customer", "Premium plan user", companyId);
+  insertContact.run("Bob Smith", "+15550102", "bob@example.com", "lead", "Interested in billing support", companyId);
+  insertContact.run("Charlie Brown", "+15550103", "charlie@example.com", "customer", "Reported outage last week", companyId);
+
+  const insertCampaign = db.prepare("INSERT INTO campaigns (name, type, company_id) VALUES (?, ?, ?)");
+  insertCampaign.run("Q1 Sales Outreach", "outbound", companyId);
+  insertCampaign.run("Support Queue A", "inbound", companyId);
 
   const insertCampContact = db.prepare("INSERT INTO campaign_contacts (campaign_id, contact_id) VALUES (?, ?)");
   insertCampContact.run(1, 1);
@@ -105,9 +172,10 @@ if (contactCount.count === 0) {
 // Seed Admin User if empty
 const userCount = db.prepare("SELECT count(*) as count FROM users").get() as { count: number };
 if (userCount.count === 0) {
+  const company = db.prepare("SELECT id FROM companies LIMIT 1").get() as { id: number };
   const hashedPassword = bcrypt.hashSync("admin123", 10);
-  const insertUser = db.prepare("INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)");
-  insertUser.run("admin@meticall.com", hashedPassword, "Admin User", "admin");
+  const insertUser = db.prepare("INSERT INTO users (email, password, name, role, company_id) VALUES (?, ?, ?, ?, ?)");
+  insertUser.run("admin@meticall.com", hashedPassword, "Admin User", "admin", company.id);
 }
 
 async function startServer() {
@@ -158,43 +226,71 @@ async function startServer() {
     });
   };
 
+  // RBAC Middleware
+  const requireAdmin = (req: any, res: any, next: any) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  };
+
   // --- API Routes ---
 
 
   // Auth Routes
   app.post("/api/auth/register", (req, res) => {
-    const { email, password, name } = req.body;
-    if (!email || !password || !name) return res.status(400).json({ error: "Missing fields" });
+    const { email, password, name, companyName } = req.body;
+    if (!email || !password || !name || !companyName) return res.status(400).json({ error: "Missing fields" });
 
     try {
       const hashedPassword = bcrypt.hashSync(password, 10);
-      const stmt = db.prepare("INSERT INTO users (email, password, name) VALUES (?, ?, ?)");
-      const info = stmt.run(email, hashedPassword, name);
       
-      const token = jwt.sign({ id: info.lastInsertRowid, email, name, role: 'agent' }, JWT_SECRET, { expiresIn: '8h' });
+      // Transaction to create company and user
+      const transaction = db.transaction(() => {
+        // 1. Create Company
+        const compStmt = db.prepare("INSERT INTO companies (name) VALUES (?)");
+        const compInfo = compStmt.run(companyName);
+        const companyId = compInfo.lastInsertRowid;
+
+        // 2. Create Admin User
+        const userStmt = db.prepare("INSERT INTO users (email, password, name, role, company_id) VALUES (?, ?, ?, ?, ?)");
+        const userInfo = userStmt.run(email, hashedPassword, name, 'admin', companyId);
+        
+        return { userId: userInfo.lastInsertRowid, companyId };
+      });
+
+      const { userId, companyId } = transaction();
+      
+      const token = jwt.sign({ id: userId, email, name, role: 'admin', company_id: companyId }, JWT_SECRET, { expiresIn: '8h' });
       
       res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-      res.json({ token, user: { id: info.lastInsertRowid, email, name, role: 'agent' } });
+      res.json({ token, user: { id: userId, email, name, role: 'admin', company_id: companyId, company_name: companyName } });
     } catch (err: any) {
       if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return res.status(400).json({ error: "Email already exists" });
       }
+      console.error(err);
       res.status(500).json({ error: "Registration failed" });
     }
   });
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    const user = db.prepare(`
+      SELECT u.*, c.name as company_name 
+      FROM users u 
+      LEFT JOIN companies c ON u.company_id = c.id 
+      WHERE u.email = ?
+    `).get(email) as any;
 
     if (!user || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
+    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role, company_id: user.company_id }, JWT_SECRET, { expiresIn: '8h' });
     
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, company_id: user.company_id, company_name: user.company_name } });
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -203,7 +299,13 @@ async function startServer() {
   });
 
   app.get("/api/auth/me", authenticateToken, (req: any, res) => {
-    res.json({ user: req.user });
+    const user = db.prepare(`
+      SELECT u.id, u.email, u.name, u.role, u.company_id, c.name as company_name 
+      FROM users u 
+      LEFT JOIN companies c ON u.company_id = c.id 
+      WHERE u.id = ?
+    `).get(req.user.id);
+    res.json({ user });
   });
 
   // Protected Routes
@@ -256,25 +358,28 @@ async function startServer() {
     res.send(twiml.toString());
   });
 
-  // 3. Data APIs
-  app.get("/api/contacts", authenticateToken, (req, res) => {
-    const contacts = db.prepare("SELECT * FROM contacts").all();
+  // 3. Data APIs (Scoped by Company)
+  app.get("/api/contacts", authenticateToken, (req: any, res) => {
+    const contacts = db.prepare("SELECT * FROM contacts WHERE company_id = ?").all(req.user.company_id);
     res.json(contacts);
   });
 
-  app.get("/api/campaigns", authenticateToken, (req, res) => {
-    const campaigns = db.prepare("SELECT * FROM campaigns").all();
+  app.get("/api/campaigns", authenticateToken, (req: any, res) => {
+    const campaigns = db.prepare("SELECT * FROM campaigns WHERE company_id = ?").all(req.user.company_id);
     res.json(campaigns);
   });
 
-  app.get("/api/logs", authenticateToken, (req, res) => {
+  app.get("/api/logs", authenticateToken, (req: any, res) => {
+    // Admins see all logs, Agents see only their own? 
+    // For now, let's allow everyone in the company to see logs for collaboration
     const logs = db.prepare(`
       SELECT l.*, c.name as contact_name, u.name as agent_name
       FROM call_logs l 
       LEFT JOIN contacts c ON l.contact_id = c.id 
       LEFT JOIN users u ON l.agent_id = u.id
+      WHERE u.company_id = ?
       ORDER BY l.timestamp DESC
-    `).all();
+    `).all(req.user.company_id);
     res.json(logs);
   });
 
@@ -286,6 +391,30 @@ async function startServer() {
     // Notify clients
     io.emit("log_update");
     res.json({ success: true });
+  });
+
+  // --- Team Management APIs (Admin Only) ---
+  app.get("/api/team", authenticateToken, requireAdmin, (req: any, res) => {
+    const users = db.prepare("SELECT id, name, email, role, created_at FROM users WHERE company_id = ?").all(req.user.company_id);
+    res.json(users);
+  });
+
+  app.post("/api/team", authenticateToken, requireAdmin, (req: any, res) => {
+    const { email, password, name, role } = req.body;
+    if (!email || !password || !name) return res.status(400).json({ error: "Missing fields" });
+
+    try {
+      const hashedPassword = bcrypt.hashSync(password, 10);
+      const stmt = db.prepare("INSERT INTO users (email, password, name, role, company_id) VALUES (?, ?, ?, ?, ?)");
+      const info = stmt.run(email, hashedPassword, name, role || 'agent', req.user.company_id);
+      
+      res.json({ success: true, user: { id: info.lastInsertRowid, email, name, role } });
+    } catch (err: any) {
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        return res.status(400).json({ error: "Email already exists" });
+      }
+      res.status(500).json({ error: "Failed to add user" });
+    }
   });
 
   // --- CRM Integration Routes ---
@@ -311,13 +440,13 @@ async function startServer() {
         { name: "Google Lead 2", phone: "+15550202", email: "lead2@gmail.com", type: "lead", source: "google" }
       ];
 
-      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source, company_id) VALUES (?, ?, ?, ?, ?, ?)");
       const transaction = db.transaction((contacts) => {
         for (const contact of contacts) {
           // Check if exists
-          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ? AND company_id = ?").get(contact.email, req.user.company_id);
           if (!exists) {
-            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source, req.user.company_id);
           }
         }
       });
@@ -343,12 +472,12 @@ async function startServer() {
         { name: "HubSpot Deal 1", phone: "+15550301", email: "deal1@hubspot.com", type: "customer", source: "hubspot" }
       ];
 
-      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source, company_id) VALUES (?, ?, ?, ?, ?, ?)");
       const transaction = db.transaction((contacts) => {
         for (const contact of contacts) {
-          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ? AND company_id = ?").get(contact.email, req.user.company_id);
           if (!exists) {
-            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source, req.user.company_id);
           }
         }
       });
@@ -372,12 +501,12 @@ async function startServer() {
         { name: "SFDC Opportunity 1", phone: "+15550401", email: "opp1@salesforce.com", type: "lead", source: "salesforce" }
       ];
 
-      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source, company_id) VALUES (?, ?, ?, ?, ?, ?)");
       const transaction = db.transaction((contacts) => {
         for (const contact of contacts) {
-          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ? AND company_id = ?").get(contact.email, req.user.company_id);
           if (!exists) {
-            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source, req.user.company_id);
           }
         }
       });

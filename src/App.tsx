@@ -52,6 +52,7 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,7 +61,7 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
     try {
       let res;
       if (isRegister) {
-        res = await api.register({ email, password, name });
+        res = await api.register({ email, password, name, companyName });
         toast.success("Account created successfully!");
       } else {
         res = await api.login({ email, password });
@@ -90,20 +91,36 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegister && (
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                  placeholder="John Doe"
-                  required
-                />
+            <>
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-1">Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                    placeholder="John Doe"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-1">Company Name</label>
+                <div className="relative">
+                  <LayoutGrid className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                    placeholder="Acme Corp"
+                    required
+                  />
+                </div>
+              </div>
+            </>
           )}
           <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1">Email Address</label>
@@ -159,7 +176,7 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
 
 // --- App Components ---
 
-const Sidebar = ({ activeTab, setActiveTab, onLogout }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void }) => (
+const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void, user: UserType }) => (
   <div className="w-16 bg-zinc-900 flex flex-col items-center py-6 gap-6 border-r border-zinc-800">
     <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
       <Phone className="text-white w-6 h-6" />
@@ -167,6 +184,9 @@ const Sidebar = ({ activeTab, setActiveTab, onLogout }: { activeTab: string, set
     <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
     <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
     <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+    {user.role === 'admin' && (
+      <NavIcon icon={<User />} active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
+    )}
     <div className="mt-auto flex flex-col gap-4">
       <NavIcon icon={<Settings />} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       <button
@@ -187,6 +207,129 @@ const NavIcon = ({ icon, active, onClick }: { icon: React.ReactNode, active: boo
     {React.cloneElement(icon as React.ReactElement, { size: 20 })}
   </button>
 );
+
+const TeamManagement = () => {
+  const [team, setTeam] = useState<UserType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newMember, setNewMember] = useState({ name: '', email: '', password: '', role: 'agent' });
+
+  useEffect(() => {
+    loadTeam();
+  }, []);
+
+  const loadTeam = async () => {
+    try {
+      const users = await api.getTeam();
+      setTeam(users);
+    } catch (err) {
+      toast.error("Failed to load team");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.addTeamMember(newMember);
+      toast.success("Team member added");
+      setIsAdding(false);
+      setNewMember({ name: '', email: '', password: '', role: 'agent' });
+      loadTeam();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  return (
+    <div className="p-8 h-full overflow-y-auto">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-semibold text-zinc-100">Team Management</h1>
+        <button 
+          onClick={() => setIsAdding(!isAdding)}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+        >
+          {isAdding ? 'Cancel' : 'Add Member'}
+        </button>
+      </div>
+
+      {isAdding && (
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl mb-8">
+          <h3 className="text-lg font-medium text-zinc-100 mb-4">Add New Team Member</h3>
+          <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input
+              type="text"
+              placeholder="Full Name"
+              value={newMember.name}
+              onChange={e => setNewMember({...newMember, name: e.target.value})}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white"
+              required
+            />
+            <input
+              type="email"
+              placeholder="Email Address"
+              value={newMember.email}
+              onChange={e => setNewMember({...newMember, email: e.target.value})}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white"
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={newMember.password}
+              onChange={e => setNewMember({...newMember, password: e.target.value})}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white"
+              required
+            />
+            <select
+              value={newMember.role}
+              onChange={e => setNewMember({...newMember, role: e.target.value})}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white"
+            >
+              <option value="agent">Agent</option>
+              <option value="admin">Admin</option>
+            </select>
+            <div className="md:col-span-2">
+              <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-medium">
+                Create User
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-zinc-950/50 text-zinc-400 text-xs uppercase font-medium">
+            <tr>
+              <th className="px-6 py-4">Name</th>
+              <th className="px-6 py-4">Email</th>
+              <th className="px-6 py-4">Role</th>
+              <th className="px-6 py-4">Joined</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {team.map(member => (
+              <tr key={member.id} className="hover:bg-zinc-800/30 transition-colors">
+                <td className="px-6 py-4 font-medium text-zinc-200">{member.name}</td>
+                <td className="px-6 py-4 text-zinc-400">{member.email}</td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-1 rounded text-xs uppercase ${member.role === 'admin' ? 'bg-purple-500/10 text-purple-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                    {member.role}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-zinc-500 text-sm">
+                  {member.created_at ? new Date(member.created_at).toLocaleDateString() : '-'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
 
 const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Device | null, activeCall: Call | null, setActiveCall: (c: Call | null) => void, contacts: Contact[] }) => {
   const [number, setNumber] = useState('');
@@ -652,7 +795,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-black text-zinc-100 font-sans overflow-hidden">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} user={user} />
       
       <main className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative">
@@ -668,6 +811,7 @@ export default function App() {
           )}
           {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} user={user} />}
           {activeTab === 'history' && <CallHistory logs={logs} />}
+          {activeTab === 'team' && user.role === 'admin' && <TeamManagement />}
           {activeTab === 'settings' && (
             <div className="p-8">
               <h1 className="text-3xl font-semibold mb-4">Settings</h1>
@@ -681,10 +825,15 @@ export default function App() {
                     <div className="font-medium">{user.name}</div>
                     <div className="text-zinc-500 text-sm">{user.email}</div>
                   </div>
-                  <div className="ml-auto">
+                  <div className="ml-auto flex flex-col items-end gap-1">
                     <span className="px-3 py-1 bg-zinc-800 rounded-full text-xs uppercase tracking-wider text-zinc-400">
                       {user.role}
                     </span>
+                    {user.company_name && (
+                      <span className="text-xs text-zinc-500">
+                        {user.company_name}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
