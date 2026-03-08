@@ -107,5 +107,35 @@ export const api = {
       },
       body: JSON.stringify(data),
     });
-  }
+  },
+  // Integrations
+  getIntegrations: async () => {
+    const res = await fetch('/api/integrations', { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch integrations');
+    return res.json();
+  },
+  syncGoogle: async () => {
+    const res = await fetch('/api/integrations/google/sync', { 
+      method: 'POST',
+      headers: getAuthHeaders() 
+    });
+    if (!res.ok) throw new Error('Google sync failed');
+    return res.json();
+  },
+  syncHubSpot: async () => {
+    const res = await fetch('/api/integrations/hubspot/sync', { 
+      method: 'POST',
+      headers: getAuthHeaders() 
+    });
+    if (!res.ok) throw new Error('HubSpot sync failed');
+    return res.json();
+  },
+  syncSalesforce: async () => {
+    const res = await fetch('/api/integrations/salesforce/sync', { 
+      method: 'POST',
+      headers: getAuthHeaders() 
+    });
+    if (!res.ok) throw new Error('Salesforce sync failed');
+    return res.json();
+  },
 };

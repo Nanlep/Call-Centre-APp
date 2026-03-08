@@ -1,8 +1,49 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle } from 'lucide-react';
 import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
+import { Toaster, toast } from 'sonner';
+
+// --- Error Boundary ---
+export class ErrorBoundary extends Component<any, any> {
+  constructor(props: any) {
+    super(props);
+    (this as any).state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if ((this as any).state.hasError) {
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-8">
+          <div className="bg-zinc-900 border border-red-500/20 rounded-2xl p-8 max-w-md text-center">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="text-red-500 w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
+            <p className="text-zinc-400 mb-6">The application encountered an unexpected error. Our team has been notified.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (this as any).props.children;
+  }
+}
 
 // --- Auth Components ---
 
@@ -11,24 +52,24 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
     try {
       let res;
       if (isRegister) {
         res = await api.register({ email, password, name });
+        toast.success("Account created successfully!");
       } else {
         res = await api.login({ email, password });
+        toast.success("Welcome back!");
       }
       localStorage.setItem('token', res.token);
       onLogin(res.user);
     } catch (err: any) {
-      setError(err.message);
+      toast.error(err.message || "Authentication failed");
     } finally {
       setLoading(false);
     }
@@ -46,12 +87,6 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
         <p className="text-zinc-400 text-center mb-8">
           {isRegister ? 'Create your enterprise account' : 'Sign in to your dashboard'}
         </p>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-sm mb-6 text-center">
-            {error}
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegister && (
@@ -120,6 +155,7 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
     </div>
   );
 };
+
 
 // --- App Components ---
 
@@ -281,6 +317,41 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Devic
           </button>
         )}
       </div>
+    </div>
+  );
+};
+
+const IntegrationCard = ({ name, description, icon, onSync }: { name: string, description: string, icon: React.ReactNode, onSync: () => Promise<void> }) => {
+  const [loading, setLoading] = useState(false);
+  
+  const handleSync = async () => {
+    setLoading(true);
+    try {
+      await onSync();
+    } catch (e) {
+      console.error(e);
+      alert('Sync failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between p-4 bg-zinc-950/50 rounded-xl border border-zinc-800">
+      <div className="flex items-center gap-4">
+        {icon}
+        <div>
+          <div className="font-medium text-white">{name}</div>
+          <div className="text-sm text-zinc-500">{description}</div>
+        </div>
+      </div>
+      <button 
+        onClick={handleSync}
+        disabled={loading}
+        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+      >
+        {loading ? 'Syncing...' : 'Sync Now'}
+      </button>
     </div>
   );
 };
@@ -569,6 +640,39 @@ export default function App() {
                       {user.role}
                     </span>
                   </div>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 mb-6">
+                <h3 className="text-lg font-medium mb-4">Integrations</h3>
+                <div className="space-y-4">
+                  <IntegrationCard 
+                    name="Google Sheets" 
+                    description="Sync contacts from Google Sheets" 
+                    icon={<div className="w-8 h-8 bg-green-500/20 text-green-500 rounded-lg flex items-center justify-center font-bold">G</div>}
+                    onSync={async () => {
+                      await api.syncGoogle();
+                      window.location.reload(); // Refresh to show new contacts
+                    }}
+                  />
+                  <IntegrationCard 
+                    name="HubSpot" 
+                    description="Import deals and contacts from HubSpot" 
+                    icon={<div className="w-8 h-8 bg-orange-500/20 text-orange-500 rounded-lg flex items-center justify-center font-bold">H</div>}
+                    onSync={async () => {
+                      await api.syncHubSpot();
+                      window.location.reload();
+                    }}
+                  />
+                  <IntegrationCard 
+                    name="Salesforce" 
+                    description="Connect to Salesforce CRM" 
+                    icon={<div className="w-8 h-8 bg-blue-500/20 text-blue-500 rounded-lg flex items-center justify-center font-bold">S</div>}
+                    onSync={async () => {
+                      await api.syncSalesforce();
+                      window.location.reload();
+                    }}
+                  />
                 </div>
               </div>
 

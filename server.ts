@@ -9,6 +9,13 @@ import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
+import { google } from "googleapis";
+import * as hubspot from "@hubspot/api-client";
+import jsforce from "jsforce";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import cors from "cors";
+import morgan from "morgan";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || "meti-call-center-secret-key-change-in-prod";
@@ -17,6 +24,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "meti-call-center-secret-key-change
 const db = new Database("call_center.db");
 db.pragma("journal_mode = WAL");
 
+// ... (Database Schema and Seeding remains the same) ...
 // Initialize Schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -28,13 +36,25 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS user_integrations (
+    user_id INTEGER,
+    provider TEXT NOT NULL, -- google, hubspot, salesforce
+    access_token TEXT,
+    refresh_token TEXT,
+    instance_url TEXT, -- for salesforce
+    expires_at DATETIME,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    UNIQUE(user_id, provider)
+  );
+
   CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     email TEXT,
     type TEXT DEFAULT 'customer', -- customer, lead
-    notes TEXT
+    notes TEXT,
+    source TEXT DEFAULT 'manual' -- manual, google, hubspot, salesforce
   );
 
   CREATE TABLE IF NOT EXISTS campaigns (
@@ -96,6 +116,31 @@ async function startServer() {
   const io = new Server(httpServer);
   const PORT = 3000;
 
+  // --- Enterprise Security & Logging Middleware ---
+  
+  // 1. Secure HTTP Headers
+  app.use(helmet({
+    contentSecurityPolicy: false, // Disabled for dev/iframe compatibility, enable in strict prod
+    crossOriginEmbedderPolicy: false,
+  }));
+
+  // 2. CORS Configuration
+  app.use(cors({
+    origin: process.env.APP_URL || "*", // Restrict to app domain in prod
+    credentials: true,
+  }));
+
+  // 3. Rate Limiting (Prevent Brute Force & DDoS)
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: "Too many requests from this IP, please try again later."
+  });
+  app.use("/api/", limiter); // Apply to API routes
+
+  // 4. Request Logging
+  app.use(morgan("combined")); // Standard Apache combined log format
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
@@ -113,6 +158,7 @@ async function startServer() {
   };
 
   // --- API Routes ---
+
 
   // Auth Routes
   app.post("/api/auth/register", (req, res) => {
@@ -239,6 +285,112 @@ async function startServer() {
     // Notify clients
     io.emit("log_update");
     res.json({ success: true });
+  });
+
+  // --- CRM Integration Routes ---
+
+  // Get Integrations Status
+  app.get("/api/integrations", authenticateToken, (req: any, res) => {
+    const integrations = db.prepare("SELECT provider FROM user_integrations WHERE user_id = ?").all(req.user.id);
+    const connected = integrations.map((i: any) => i.provider);
+    res.json({
+      google: connected.includes('google'),
+      hubspot: connected.includes('hubspot'),
+      salesforce: connected.includes('salesforce')
+    });
+  });
+
+  // Google Sheets Sync (Mock Implementation for Demo)
+  app.post("/api/integrations/google/sync", authenticateToken, async (req: any, res) => {
+    // In a real app, this would use the stored access token to fetch from Sheets API
+    // For demo, we'll simulate fetching contacts
+    try {
+      const mockContacts = [
+        { name: "Google Lead 1", phone: "+15550201", email: "lead1@gmail.com", type: "lead", source: "google" },
+        { name: "Google Lead 2", phone: "+15550202", email: "lead2@gmail.com", type: "lead", source: "google" }
+      ];
+
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const transaction = db.transaction((contacts) => {
+        for (const contact of contacts) {
+          // Check if exists
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          if (!exists) {
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+          }
+        }
+      });
+      transaction(mockContacts);
+      
+      // Mark as connected if not already
+      const check = db.prepare("SELECT * FROM user_integrations WHERE user_id = ? AND provider = 'google'").get(req.user.id);
+      if (!check) {
+        db.prepare("INSERT INTO user_integrations (user_id, provider) VALUES (?, 'google')").run(req.user.id);
+      }
+
+      res.json({ success: true, count: mockContacts.length });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Sync failed" });
+    }
+  });
+
+  // HubSpot Sync (Mock Implementation)
+  app.post("/api/integrations/hubspot/sync", authenticateToken, async (req: any, res) => {
+    try {
+      const mockContacts = [
+        { name: "HubSpot Deal 1", phone: "+15550301", email: "deal1@hubspot.com", type: "customer", source: "hubspot" }
+      ];
+
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const transaction = db.transaction((contacts) => {
+        for (const contact of contacts) {
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          if (!exists) {
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+          }
+        }
+      });
+      transaction(mockContacts);
+
+      const check = db.prepare("SELECT * FROM user_integrations WHERE user_id = ? AND provider = 'hubspot'").get(req.user.id);
+      if (!check) {
+        db.prepare("INSERT INTO user_integrations (user_id, provider) VALUES (?, 'hubspot')").run(req.user.id);
+      }
+
+      res.json({ success: true, count: mockContacts.length });
+    } catch (err) {
+      res.status(500).json({ error: "Sync failed" });
+    }
+  });
+
+  // Salesforce Sync (Mock Implementation)
+  app.post("/api/integrations/salesforce/sync", authenticateToken, async (req: any, res) => {
+    try {
+      const mockContacts = [
+        { name: "SFDC Opportunity 1", phone: "+15550401", email: "opp1@salesforce.com", type: "lead", source: "salesforce" }
+      ];
+
+      const stmt = db.prepare("INSERT INTO contacts (name, phone, email, type, source) VALUES (?, ?, ?, ?, ?)");
+      const transaction = db.transaction((contacts) => {
+        for (const contact of contacts) {
+          const exists = db.prepare("SELECT id FROM contacts WHERE email = ?").get(contact.email);
+          if (!exists) {
+            stmt.run(contact.name, contact.phone, contact.email, contact.type, contact.source);
+          }
+        }
+      });
+      transaction(mockContacts);
+
+      const check = db.prepare("SELECT * FROM user_integrations WHERE user_id = ? AND provider = 'salesforce'").get(req.user.id);
+      if (!check) {
+        db.prepare("INSERT INTO user_integrations (user_id, provider) VALUES (?, 'salesforce')").run(req.user.id);
+      }
+
+      res.json({ success: true, count: mockContacts.length });
+    } catch (err) {
+      res.status(500).json({ error: "Sync failed" });
+    }
   });
 
   // Socket.io connection
