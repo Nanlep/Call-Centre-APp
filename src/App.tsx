@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play } from 'lucide-react';
 import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -662,103 +662,143 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
 
 // --- Landing Page ---
 
-const LandingPage = ({ onGetStarted, onLogin }: { onGetStarted: () => void, onLogin: () => void }) => (
-  <div className="min-h-screen bg-black text-white font-sans selection:bg-indigo-500/30">
-    <nav className="border-b border-white/10 backdrop-blur-md fixed w-full z-50 bg-black/50">
-      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Phone className="text-white w-6 h-6" />
-          </div>
-          <span className="text-xl font-bold tracking-tight">Meti Call Center</span>
-        </div>
-        <div className="flex items-center gap-6">
-          <button onClick={onLogin} className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-            Sign In
-          </button>
-          <button 
-            onClick={onGetStarted}
-            className="bg-white text-black px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
-          >
-            Get Started
-          </button>
-        </div>
-      </div>
-    </nav>
+const LandingPage = ({ onGetStarted, onLogin }: { onGetStarted: () => void, onLogin: () => void }) => {
+  const [showDemo, setShowDemo] = useState(false);
 
-    <section className="pt-32 pb-20 px-6 relative overflow-hidden">
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-indigo-600/20 blur-[120px] rounded-full pointer-events-none" />
-      <div className="max-w-4xl mx-auto text-center relative z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <span className="inline-block px-4 py-1.5 rounded-full border border-white/10 bg-white/5 text-sm font-medium text-indigo-300 mb-6 backdrop-blur-sm">
-            Enterprise-Grade Cloud Contact Center
-          </span>
-          <h1 className="text-6xl md:text-7xl font-bold tracking-tight mb-8 leading-tight">
-            Connect with customers <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">
-              at the speed of light.
-            </span>
-          </h1>
-          <p className="text-xl text-zinc-400 mb-10 max-w-2xl mx-auto leading-relaxed">
-            The all-in-one platform for modern sales and support teams. 
-            Crystal clear voice, real-time analytics, and seamless CRM integrations.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+  return (
+    <div className="min-h-screen bg-black text-white font-sans selection:bg-indigo-500/30">
+      <nav className="border-b border-white/10 backdrop-blur-md fixed w-full z-50 bg-black/50">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <Phone className="text-white w-6 h-6" />
+            </div>
+            <span className="text-xl font-bold tracking-tight">Meti Call Center</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <button onClick={onLogin} className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+              Sign In
+            </button>
             <button 
               onClick={onGetStarted}
-              className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-semibold text-lg transition-all shadow-xl shadow-indigo-500/20 hover:scale-105"
+              className="bg-white text-black px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
             >
-              Start Free Trial
-            </button>
-            <button className="w-full sm:w-auto px-8 py-4 bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-800 rounded-2xl font-semibold text-lg transition-all">
-              View Demo
+              Get Started
             </button>
           </div>
-        </motion.div>
-      </div>
-    </section>
-
-    <section className="py-24 bg-zinc-950 border-y border-white/5">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-          <FeatureCard 
-            icon={<Phone className="w-8 h-8 text-indigo-400" />}
-            title="Smart Dialer"
-            description="Auto-dialing, call recording, and intelligent routing to keep your agents productive."
-          />
-          <FeatureCard 
-            icon={<Activity className="w-8 h-8 text-emerald-400" />}
-            title="Real-time Analytics"
-            description="Monitor team performance, call volume, and conversion rates in real-time."
-          />
-          <FeatureCard 
-            icon={<LayoutGrid className="w-8 h-8 text-purple-400" />}
-            title="CRM Integration"
-            description="Seamlessly sync with HubSpot, Salesforce, and Google Sheets. No code required."
-          />
         </div>
-      </div>
-    </section>
+      </nav>
 
-    <footer className="py-12 border-t border-white/10 bg-black">
-      <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-zinc-800 rounded-lg flex items-center justify-center">
-            <Phone className="text-zinc-400 w-4 h-4" />
+      <section className="pt-32 pb-20 px-6 relative overflow-hidden">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-indigo-600/20 blur-[120px] rounded-full pointer-events-none" />
+        <div className="max-w-4xl mx-auto text-center relative z-10">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <span className="inline-block px-4 py-1.5 rounded-full border border-white/10 bg-white/5 text-sm font-medium text-indigo-300 mb-6 backdrop-blur-sm">
+              Enterprise-Grade Cloud Contact Center
+            </span>
+            <h1 className="text-6xl md:text-7xl font-bold tracking-tight mb-8 leading-tight">
+              Connect with customers <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">
+                at the speed of light.
+              </span>
+            </h1>
+            <p className="text-xl text-zinc-400 mb-10 max-w-2xl mx-auto leading-relaxed">
+              The all-in-one platform for modern sales and support teams. 
+              Crystal clear voice, real-time analytics, and seamless CRM integrations.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button 
+                onClick={onGetStarted}
+                className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-semibold text-lg transition-all shadow-xl shadow-indigo-500/20 hover:scale-105"
+              >
+                Start Free Trial
+              </button>
+              <button 
+                onClick={() => setShowDemo(true)}
+                className="w-full sm:w-auto px-8 py-4 bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-800 rounded-2xl font-semibold text-lg transition-all flex items-center justify-center gap-2"
+              >
+                <Play className="w-5 h-5" /> View Demo
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      <section className="py-24 bg-zinc-950 border-y border-white/5">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            <FeatureCard 
+              icon={<Phone className="w-8 h-8 text-indigo-400" />}
+              title="Smart Dialer"
+              description="Auto-dialing, call recording, and intelligent routing to keep your agents productive."
+            />
+            <FeatureCard 
+              icon={<Activity className="w-8 h-8 text-emerald-400" />}
+              title="Real-time Analytics"
+              description="Monitor team performance, call volume, and conversion rates in real-time."
+            />
+            <FeatureCard 
+              icon={<LayoutGrid className="w-8 h-8 text-purple-400" />}
+              title="CRM Integration"
+              description="Seamlessly sync with HubSpot, Salesforce, and Google Sheets. No code required."
+            />
           </div>
-          <span className="font-semibold text-zinc-400">Meti Call Center</span>
         </div>
-        <div className="text-zinc-600 text-sm">
-          © 2024 Meti Inc. All rights reserved.
+      </section>
+
+      <footer className="py-12 border-t border-white/10 bg-black">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-zinc-800 rounded-lg flex items-center justify-center">
+              <Phone className="text-zinc-400 w-4 h-4" />
+            </div>
+            <span className="font-semibold text-zinc-400">Meti Call Center</span>
+          </div>
+          <div className="text-zinc-600 text-sm">
+            © 2024 Meti Inc. All rights reserved.
+          </div>
         </div>
-      </div>
-    </footer>
-  </div>
-);
+      </footer>
+
+      <AnimatePresence>
+        {showDemo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm"
+            onClick={() => setShowDemo(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-5xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowDemo(false)}
+                className="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <video
+                src="https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4"
+                className="w-full h-full object-cover"
+                autoPlay
+                controls
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 const FeatureCard = ({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) => (
   <div className="p-8 rounded-3xl bg-black border border-zinc-800 hover:border-zinc-700 transition-colors">
