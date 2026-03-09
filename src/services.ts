@@ -38,7 +38,9 @@ export interface CallLog {
   direction: 'inbound' | 'outbound';
   duration: number;
   status: string;
+  summary?: string;
   timestamp: string;
+  type?: 'call' | 'message';
 }
 
 // Services
@@ -94,6 +96,15 @@ export const api = {
   },
 
   // Team Management
+  updateStatus: async (status: string) => {
+    const res = await fetch('/api/users/status', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) throw new Error('Failed to update status');
+    return res.json();
+  },
   getTeam: async (): Promise<User[]> => {
     const res = await fetch('/api/team', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch team');
@@ -108,6 +119,20 @@ export const api = {
     if (!res.ok) {
       const error = await res.json();
       throw new Error(error.error || 'Failed to add team member');
+    }
+    return res.json();
+  },
+
+  // WhatsApp
+  sendWhatsApp: async (to: string, body: string, contact_id?: number) => {
+    const res = await fetch('/api/messages/send', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ to, body, contact_id }),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Failed to send WhatsApp message');
     }
     return res.json();
   },
@@ -128,6 +153,11 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch campaigns');
     return res.json();
   },
+  getCampaignContacts: async (id: number): Promise<Contact[]> => {
+    const res = await fetch(`/api/campaigns/${id}/contacts`, { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch campaign contacts');
+    return res.json();
+  },
   getLogs: async (): Promise<CallLog[]> => {
     const res = await fetch('/api/logs', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch logs');
@@ -139,6 +169,14 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
+  },
+  generateSummary: async (id: number) => {
+    const res = await fetch(`/api/logs/${id}/summary`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error('Failed to generate summary');
+    return res.json();
   },
   // Integrations
   getIntegrations: async () => {

@@ -2,6 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
 import path from "path";
 import { fileURLToPath } from "url";
 import Twilio from "twilio";
@@ -71,6 +72,21 @@ const runMigrations = () => {
       }
     }
 
+    // 5. Create Message Logs Table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS message_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id INTEGER,
+        direction TEXT, -- inbound, outbound
+        body TEXT,
+        status TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        agent_id INTEGER,
+        FOREIGN KEY(contact_id) REFERENCES contacts(id),
+        FOREIGN KEY(agent_id) REFERENCES users(id)
+      );
+    `);
+
   } catch (err) {
     console.error("Migration error:", err);
   }
@@ -134,12 +150,18 @@ db.exec(`
     direction TEXT, -- inbound, outbound
     duration INTEGER,
     status TEXT,
+    summary TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     agent_id INTEGER,
     FOREIGN KEY(contact_id) REFERENCES contacts(id),
     FOREIGN KEY(agent_id) REFERENCES users(id)
   );
 `);
+
+// Add columns if they don't exist (migrations)
+try { db.prepare("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'offline'").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE call_logs ADD COLUMN summary TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE call_logs ADD COLUMN recording_url TEXT").run(); } catch (e) {}
 
 // Seed Data if empty
 const contactCount = db.prepare("SELECT count(*) as count FROM contacts").get() as { count: number };
@@ -179,6 +201,9 @@ if (userCount.count === 0) {
 }
 
 async function startServer() {
+  // Initialize Gemini
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
   const app = express();
   app.set('trust proxy', 1); // Trust first proxy (required for rate limiting behind nginx)
   const httpServer = createServer(app);
@@ -342,20 +367,65 @@ async function startServer() {
   app.post("/api/voice", (req, res) => {
     const twiml = new Twilio.twiml.VoiceResponse();
     const { To } = req.body;
+    const host = process.env.APP_URL || `http://localhost:${PORT}`;
 
     if (To) {
       // Outbound call
-      const dial = twiml.dial({ callerId: process.env.TWILIO_CALLER_ID });
+      const dial = twiml.dial({ 
+        callerId: process.env.TWILIO_CALLER_ID,
+        record: 'record-from-answer-dual',
+        recordingStatusCallback: `${host}/api/voice/recording`,
+        recordingStatusCallbackEvent: ['completed']
+      });
       dial.number(To);
     } else {
       // Inbound call
-      const dial = twiml.dial();
-      // In a real app, we'd route to available agents. For now, broadcast.
-      dial.client("agent_1"); 
+      const availableAgent = db.prepare("SELECT id FROM users WHERE status = 'available' LIMIT 1").get() as { id: number } | undefined;
+      
+      if (availableAgent) {
+        const dial = twiml.dial({
+          record: 'record-from-answer-dual',
+          recordingStatusCallback: `${host}/api/voice/recording`,
+          recordingStatusCallbackEvent: ['completed']
+        });
+        dial.client(`agent_${availableAgent.id}`); 
+      } else {
+        twiml.say("Sorry, no agents are currently available. Please try again later.");
+        return res.type("text/xml").send(twiml.toString());
+      }
     }
 
     res.type("text/xml");
     res.send(twiml.toString());
+  });
+
+  app.post("/api/voice/recording", (req, res) => {
+    const { RecordingUrl, CallSid } = req.body;
+    // In a real app, we'd look up the call_log by CallSid (if we saved it)
+    // and then update it with the RecordingUrl and trigger AI summary.
+    // For now, we'll just log it. We'll simulate AI summary on the frontend or via a manual trigger.
+    console.log("Recording available:", RecordingUrl);
+    res.sendStatus(200);
+  });
+
+  // Agent Status
+  app.post("/api/users/status", authenticateToken, (req: any, res) => {
+    const { status } = req.body;
+    db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, req.user.id);
+    res.json({ success: true, status });
+  });
+
+  app.get("/api/users/me", authenticateToken, (req: any, res) => {
+    const user = db.prepare("SELECT id, name, email, role, status FROM users WHERE id = ?").get(req.user.id);
+    res.json(user);
+  });
+
+  // Campaign Contacts
+  app.get("/api/campaigns/:id/contacts", authenticateToken, (req: any, res) => {
+    // For prototype, just return all contacts if campaign_contacts table is empty/not linked
+    // Let's just return all contacts for the company to simulate a campaign list
+    const contacts = db.prepare("SELECT * FROM contacts WHERE company_id = ?").all(req.user.company_id);
+    res.json(contacts);
   });
 
   // 3. Data APIs (Scoped by Company)
@@ -372,14 +442,26 @@ async function startServer() {
   app.get("/api/logs", authenticateToken, (req: any, res) => {
     // Admins see all logs, Agents see only their own? 
     // For now, let's allow everyone in the company to see logs for collaboration
-    const logs = db.prepare(`
-      SELECT l.*, c.name as contact_name, u.name as agent_name
+    const callLogs = db.prepare(`
+      SELECT l.id, l.contact_id, l.direction, l.duration, l.status, l.timestamp, l.agent_id, c.name as contact_name, u.name as agent_name, 'call' as type
       FROM call_logs l 
       LEFT JOIN contacts c ON l.contact_id = c.id 
       LEFT JOIN users u ON l.agent_id = u.id
       WHERE u.company_id = ?
-      ORDER BY l.timestamp DESC
     `).all(req.user.company_id);
+
+    const messageLogs = db.prepare(`
+      SELECT m.id, m.contact_id, m.direction, 0 as duration, m.status, m.timestamp, m.agent_id, c.name as contact_name, u.name as agent_name, 'message' as type
+      FROM message_logs m 
+      LEFT JOIN contacts c ON m.contact_id = c.id 
+      LEFT JOIN users u ON m.agent_id = u.id
+      WHERE u.company_id = ?
+    `).all(req.user.company_id);
+
+    const logs = [...callLogs, ...messageLogs].sort((a: any, b: any) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
     res.json(logs);
   });
 
@@ -391,6 +473,73 @@ async function startServer() {
     // Notify clients
     io.emit("log_update");
     res.json({ success: true });
+  });
+
+  app.post("/api/logs/:id/summary", authenticateToken, async (req: any, res) => {
+    const logId = req.params.id;
+    const log = db.prepare(`
+      SELECT l.*, c.name as contact_name, c.type as contact_type, c.notes as contact_notes 
+      FROM call_logs l 
+      JOIN contacts c ON l.contact_id = c.id 
+      WHERE l.id = ?
+    `).get(logId) as any;
+
+    if (!log) return res.status(404).json({ error: "Log not found" });
+
+    try {
+      const prompt = `Generate a realistic 2-3 sentence call summary for a ${log.direction} call with ${log.contact_name} (a ${log.contact_type}). 
+      The call lasted ${log.duration} seconds. 
+      Context notes about this contact: ${log.contact_notes}.
+      Make it sound like a professional agent's notes.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+
+      const summary = response.text;
+      db.prepare("UPDATE call_logs SET summary = ? WHERE id = ?").run(summary, logId);
+      
+      io.emit("log_update");
+      res.json({ success: true, summary });
+    } catch (error) {
+      console.error("Error generating summary:", error);
+      res.status(500).json({ error: "Failed to generate summary" });
+    }
+  });
+
+  // --- WhatsApp Integration ---
+  app.post("/api/messages/send", authenticateToken, async (req: any, res) => {
+    const { to, body, contact_id } = req.body;
+    if (!to || !body) return res.status(400).json({ error: "Missing 'to' or 'body'" });
+
+    try {
+      const twilioClient = Twilio(
+        process.env.TWILIO_ACCOUNT_SID,
+        process.env.TWILIO_AUTH_TOKEN
+      );
+      
+      const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886"; // Twilio sandbox number default
+      
+      // Format the 'to' number for WhatsApp if not already formatted
+      const formattedTo = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+
+      const message = await twilioClient.messages.create({
+        body,
+        from: fromNumber,
+        to: formattedTo
+      });
+
+      if (contact_id) {
+        const stmt = db.prepare("INSERT INTO message_logs (contact_id, direction, body, status, agent_id) VALUES (?, ?, ?, ?, ?)");
+        stmt.run(contact_id, "outbound", body, message.status, req.user.id);
+      }
+
+      res.json({ success: true, messageSid: message.sid });
+    } catch (error: any) {
+      console.error("WhatsApp send error:", error);
+      res.status(500).json({ error: "Failed to send WhatsApp message" });
+    }
   });
 
   // --- Team Management APIs (Admin Only) ---

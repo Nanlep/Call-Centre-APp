@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play, MessageCircle, CreditCard } from 'lucide-react';
 import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
+import { Pricing } from './Pricing';
 
 // --- Error Boundary ---
 export class ErrorBoundary extends Component<any, any> {
@@ -184,6 +185,7 @@ const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: strin
     <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
     <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
     <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+    <NavIcon icon={<CreditCard />} active={activeTab === 'pricing'} onClick={() => setActiveTab('pricing')} />
     {user.role === 'admin' && (
       <NavIcon icon={<User />} active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
     )}
@@ -331,8 +333,7 @@ const TeamManagement = () => {
   );
 };
 
-const Dialer = ({ device, activeCall, setActiveCall, contacts }: { device: Device | null, activeCall: Call | null, setActiveCall: (c: Call | null) => void, contacts: Contact[] }) => {
-  const [number, setNumber] = useState('');
+const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber }: { device: Device | null, activeCall: Call | null, setActiveCall: (c: Call | null) => void, contacts: Contact[], number: string, setNumber: (n: string | ((prev: string) => string)) => void }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [duration, setDuration] = useState(0);
@@ -545,7 +546,7 @@ const IntegrationCard = ({ name, description, icon, onSync }: { name: string, de
   );
 };
 
-const Dashboard = ({ campaigns, contacts, onCallContact, user }: { campaigns: Campaign[], contacts: Contact[], onCallContact: (phone: string) => void, user: UserType }) => (
+const Dashboard = ({ campaigns, contacts, onCallContact, onWhatsAppContact, user }: { campaigns: Campaign[], contacts: Contact[], onCallContact: (phone: string) => void, onWhatsAppContact: (contact: Contact) => void, user: UserType }) => (
   <div className="p-8 h-full overflow-y-auto">
     <header className="mb-8">
       <h1 className="text-3xl font-semibold text-zinc-100 mb-2">Agent Dashboard</h1>
@@ -596,12 +597,20 @@ const Dashboard = ({ campaigns, contacts, onCallContact, user }: { campaigns: Ca
                 </span>
               </td>
               <td className="px-6 py-4 text-zinc-400 text-sm">{contact.notes}</td>
-              <td className="px-6 py-4 text-right">
+              <td className="px-6 py-4 text-right flex justify-end gap-2">
                 <button
                   onClick={() => onCallContact(contact.phone)}
                   className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors"
+                  title="Call"
                 >
                   <Phone className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onWhatsAppContact(contact)}
+                  className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors"
+                  title="WhatsApp Message"
+                >
+                  <MessageCircle className="w-4 h-4" />
                 </button>
               </td>
             </tr>
@@ -614,11 +623,12 @@ const Dashboard = ({ campaigns, contacts, onCallContact, user }: { campaigns: Ca
 
 const CallHistory = ({ logs }: { logs: CallLog[] }) => (
   <div className="p-8 h-full overflow-y-auto">
-    <h1 className="text-3xl font-semibold text-zinc-100 mb-8">Call History</h1>
+    <h1 className="text-3xl font-semibold text-zinc-100 mb-8">Activity History</h1>
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
       <table className="w-full text-left">
         <thead className="bg-zinc-950/50 text-zinc-400 text-xs uppercase font-medium">
           <tr>
+            <th className="px-6 py-4">Type</th>
             <th className="px-6 py-4">Contact</th>
             <th className="px-6 py-4">Agent</th>
             <th className="px-6 py-4">Direction</th>
@@ -628,8 +638,19 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-800">
-          {logs.map(log => (
-            <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
+          {logs.map((log, index) => (
+            <tr key={`${log.type}-${log.id}-${index}`} className="hover:bg-zinc-800/30 transition-colors">
+              <td className="px-6 py-4">
+                {log.type === 'message' ? (
+                  <span className="flex items-center gap-2 text-emerald-400">
+                    <MessageCircle className="w-4 h-4" /> Message
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 text-indigo-400">
+                    <Phone className="w-4 h-4" /> Call
+                  </span>
+                )}
+              </td>
               <td className="px-6 py-4">
                 <div className="font-medium text-zinc-200">{log.contact_name || 'Unknown'}</div>
               </td>
@@ -642,7 +663,7 @@ const CallHistory = ({ logs }: { logs: CallLog[] }) => (
                 </span>
               </td>
               <td className="px-6 py-4 text-zinc-400 font-mono text-sm">
-                {Math.floor(log.duration / 60)}:{(log.duration % 60).toString().padStart(2, '0')}
+                {log.type === 'message' ? '-' : `${Math.floor(log.duration / 60)}:${(log.duration % 60).toString().padStart(2, '0')}`}
               </td>
               <td className="px-6 py-4">
                 <span className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-400 capitalize">
@@ -814,6 +835,74 @@ const FeatureCard = ({ icon, title, description }: { icon: React.ReactNode, titl
 
 // --- Main App ---
 
+const WhatsAppModal = ({ contact, onClose }: { contact: Contact, onClose: () => void }) => {
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    if (!message.trim()) return;
+    setSending(true);
+    try {
+      await api.sendWhatsApp(contact.phone, message, contact.id);
+      toast.success('WhatsApp message sent successfully');
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to send WhatsApp message');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl"
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Send WhatsApp</h3>
+              <p className="text-sm text-zinc-400">To: {contact.name} ({contact.phone})</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Type your message here..."
+          className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none mb-6"
+        />
+
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !message.trim()}
+            className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            {sending ? 'Sending...' : 'Send Message'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<UserType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -826,6 +915,9 @@ export default function App() {
   const [logs, setLogs] = useState<CallLog[]>([]);
   const [isReady, setIsReady] = useState(false);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const [selectedWhatsAppContact, setSelectedWhatsAppContact] = useState<Contact | null>(null);
+  const [activeDialCampaign, setActiveDialCampaign] = useState<Campaign | null>(null);
+  const [number, setNumber] = useState('');
 
   // Check Auth
   useEffect(() => {
@@ -962,11 +1054,13 @@ export default function App() {
               onCallContact={(phone) => {
                 console.log("Calling", phone);
               }}
+              onWhatsAppContact={setSelectedWhatsAppContact}
               user={user}
             />
           )}
-          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} user={user} />}
+          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} onWhatsAppContact={setSelectedWhatsAppContact} user={user} />}
           {activeTab === 'history' && <CallHistory logs={logs} />}
+          {activeTab === 'pricing' && <Pricing />}
           {activeTab === 'team' && user.role === 'admin' && <TeamManagement />}
           {activeTab === 'settings' && (
             <div className="p-8">
@@ -1047,7 +1141,7 @@ export default function App() {
         {/* Right Panel - Always visible Dialer */}
         <div className="w-96 bg-zinc-950 border-l border-zinc-800 p-6 flex flex-col gap-6">
           <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Phone System</h2>
-          <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} />
+          <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} />
           
           <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
             <h3 className="text-sm font-medium text-zinc-400 mb-4">Active Scripts</h3>
@@ -1098,6 +1192,30 @@ export default function App() {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* WhatsApp Modal */}
+      <AnimatePresence>
+        {selectedWhatsAppContact && (
+          <WhatsAppModal 
+            contact={selectedWhatsAppContact} 
+            onClose={() => setSelectedWhatsAppContact(null)} 
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Auto Dialer Modal */}
+      <AnimatePresence>
+        {activeDialCampaign && (
+          <AutoDialerModal
+            campaign={activeDialCampaign}
+            onClose={() => setActiveDialCampaign(null)}
+            onCall={(phone) => {
+              setNumber(phone);
+              toast.success(`Dialing ${phone}...`);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>
