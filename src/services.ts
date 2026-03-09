@@ -27,7 +27,9 @@ export interface Campaign {
   name: string;
   type: 'inbound' | 'outbound';
   status: 'active' | 'paused' | 'completed';
+  script?: string;
   company_id?: number;
+  contacts?: Contact[];
 }
 
 export interface CallLog {
@@ -38,7 +40,6 @@ export interface CallLog {
   direction: 'inbound' | 'outbound';
   duration: number;
   status: string;
-  summary?: string;
   timestamp: string;
   type?: 'call' | 'message';
 }
@@ -96,15 +97,6 @@ export const api = {
   },
 
   // Team Management
-  updateStatus: async (status: string) => {
-    const res = await fetch('/api/users/status', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) throw new Error('Failed to update status');
-    return res.json();
-  },
   getTeam: async (): Promise<User[]> => {
     const res = await fetch('/api/team', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch team');
@@ -153,9 +145,13 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch campaigns');
     return res.json();
   },
-  getCampaignContacts: async (id: number): Promise<Contact[]> => {
-    const res = await fetch(`/api/campaigns/${id}/contacts`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch campaign contacts');
+  updateCampaign: async (id: number, data: Partial<Campaign>): Promise<{ success: boolean }> => {
+    const res = await fetch(`/api/campaigns/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update campaign');
     return res.json();
   },
   getLogs: async (): Promise<CallLog[]> => {
@@ -169,14 +165,6 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-  },
-  generateSummary: async (id: number) => {
-    const res = await fetch(`/api/logs/${id}/summary`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) throw new Error('Failed to generate summary');
-    return res.json();
   },
   // Integrations
   getIntegrations: async () => {

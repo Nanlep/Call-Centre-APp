@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play, MessageCircle, CreditCard } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play, MessageCircle, CreditCard, Megaphone } from 'lucide-react';
 import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { Pricing } from './Pricing';
+import { Campaigns } from './Campaigns';
 
 // --- Error Boundary ---
 export class ErrorBoundary extends Component<any, any> {
@@ -184,6 +185,7 @@ const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: strin
     </div>
     <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
     <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
+    <NavIcon icon={<Megaphone />} active={activeTab === 'campaigns'} onClick={() => setActiveTab('campaigns')} />
     <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
     <NavIcon icon={<CreditCard />} active={activeTab === 'pricing'} onClick={() => setActiveTab('pricing')} />
     {user.role === 'admin' && (
@@ -333,7 +335,7 @@ const TeamManagement = () => {
   );
 };
 
-const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber }: { device: Device | null, activeCall: Call | null, setActiveCall: (c: Call | null) => void, contacts: Contact[], number: string, setNumber: (n: string | ((prev: string) => string)) => void }) => {
+const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber, dialingNumber, onDialComplete }: { device: Device | null, activeCall: Call | null, setActiveCall: (c: Call | null) => void, contacts: Contact[], number: string, setNumber: (n: string | ((prev: string) => string)) => void, dialingNumber?: string | null, onDialComplete?: () => void }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [duration, setDuration] = useState(0);
@@ -366,11 +368,19 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber
     return `${mins}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handleCall = async () => {
-    if (!device) return;
+  useEffect(() => {
+    if (dialingNumber && device) {
+      handleCall(dialingNumber);
+      onDialComplete?.();
+    }
+  }, [dialingNumber, device]);
+
+  const handleCall = async (targetNumber?: string) => {
+    const numToCall = targetNumber || number;
+    if (!device || !numToCall) return;
     try {
       setStatus('Dialing...');
-      const call = await device.connect({ params: { To: number } });
+      const call = await device.connect({ params: { To: numToCall } });
       
       call.on('accept', () => {
         setStatus('In Call');
@@ -381,7 +391,7 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber
         setStatus('Ready');
         setActiveCall(null);
         // Log call
-        const contact = contacts.find(c => c.phone === number);
+        const contact = contacts.find(c => c.phone === numToCall);
         api.logCall({
           contact_id: contact?.id,
           direction: 'outbound',
@@ -499,7 +509,7 @@ const Dialer = ({ device, activeCall, setActiveCall, contacts, number, setNumber
           </>
         ) : (
           <button
-            onClick={handleCall}
+            onClick={() => handleCall()}
             disabled={!device || !number}
             className="w-full h-14 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors font-medium text-lg gap-2"
           >
@@ -903,6 +913,80 @@ const WhatsAppModal = ({ contact, onClose }: { contact: Contact, onClose: () => 
   );
 };
 
+const AutoDialerModal = ({ campaign, onClose, onCall }: { campaign: Campaign, onClose: () => void, onCall: (phone: string) => void }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const contacts = campaign.contacts || [];
+
+  const handleNext = () => {
+    if (currentIndex < contacts.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    }
+  };
+
+  const handleDial = () => {
+    if (contacts[currentIndex]) {
+      onCall(contacts[currentIndex].phone);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl"
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <Phone className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Auto Dialer</h3>
+              <p className="text-sm text-zinc-400">{campaign.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {contacts.length === 0 ? (
+          <div className="text-center py-8 text-zinc-400">
+            No contacts in this campaign.
+          </div>
+        ) : (
+          <div>
+            <div className="mb-6 p-4 bg-zinc-950 rounded-xl border border-zinc-800">
+              <div className="text-sm text-zinc-400 mb-1">Contact {currentIndex + 1} of {contacts.length}</div>
+              <div className="text-xl font-semibold text-white">{contacts[currentIndex].name}</div>
+              <div className="text-zinc-500">{contacts[currentIndex].phone}</div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleDial}
+                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Phone className="w-5 h-5" />
+                Dial Now
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={currentIndex >= contacts.length - 1}
+                className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded-xl font-medium transition-colors"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<UserType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -918,6 +1002,7 @@ export default function App() {
   const [selectedWhatsAppContact, setSelectedWhatsAppContact] = useState<Contact | null>(null);
   const [activeDialCampaign, setActiveDialCampaign] = useState<Campaign | null>(null);
   const [number, setNumber] = useState('');
+  const [dialingNumber, setDialingNumber] = useState<string | null>(null);
 
   // Check Auth
   useEffect(() => {
@@ -1052,13 +1137,20 @@ export default function App() {
               campaigns={campaigns} 
               contacts={contacts} 
               onCallContact={(phone) => {
-                console.log("Calling", phone);
+                setNumber(phone);
+                setDialingNumber(phone);
               }}
               onWhatsAppContact={setSelectedWhatsAppContact}
               user={user}
             />
           )}
-          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={() => {}} onWhatsAppContact={setSelectedWhatsAppContact} user={user} />}
+          {activeTab === 'contacts' && <Dashboard campaigns={[]} contacts={contacts} onCallContact={(phone) => {
+            setNumber(phone);
+            setDialingNumber(phone);
+          }} onWhatsAppContact={setSelectedWhatsAppContact} user={user} />}
+          {activeTab === 'campaigns' && <Campaigns campaigns={campaigns} onUpdate={() => {
+            api.getCampaigns().then(setCampaigns);
+          }} onDialCampaign={setActiveDialCampaign} />}
           {activeTab === 'history' && <CallHistory logs={logs} />}
           {activeTab === 'pricing' && <Pricing />}
           {activeTab === 'team' && user.role === 'admin' && <TeamManagement />}
@@ -1141,7 +1233,7 @@ export default function App() {
         {/* Right Panel - Always visible Dialer */}
         <div className="w-96 bg-zinc-950 border-l border-zinc-800 p-6 flex flex-col gap-6">
           <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Phone System</h2>
-          <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} />
+          <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} dialingNumber={dialingNumber} onDialComplete={() => setDialingNumber(null)} />
           
           <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
             <h3 className="text-sm font-medium text-zinc-400 mb-4">Active Scripts</h3>
@@ -1213,7 +1305,7 @@ export default function App() {
             onClose={() => setActiveDialCampaign(null)}
             onCall={(phone) => {
               setNumber(phone);
-              toast.success(`Dialing ${phone}...`);
+              setDialingNumber(phone);
             }}
           />
         )}
