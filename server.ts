@@ -136,12 +136,6 @@ db.exec(`
     company_id INTEGER REFERENCES companies(id)
   );
 
-  try {
-    db.prepare("ALTER TABLE campaigns ADD COLUMN script TEXT").run();
-  } catch (e) {
-    // Column might already exist
-  }
-
   CREATE TABLE IF NOT EXISTS campaign_contacts (
     campaign_id INTEGER,
     contact_id INTEGER,
@@ -162,6 +156,12 @@ db.exec(`
     FOREIGN KEY(agent_id) REFERENCES users(id)
   );
 `);
+
+try {
+  db.prepare("ALTER TABLE campaigns ADD COLUMN script TEXT").run();
+} catch (e) {
+  // Column might already exist
+}
 
 // Seed Data if empty
 const contactCount = db.prepare("SELECT count(*) as count FROM contacts").get() as { count: number };
@@ -213,6 +213,9 @@ async function startServer() {
   app.use(helmet({
     contentSecurityPolicy: false, // Disabled for dev/iframe compatibility, enable in strict prod
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+    frameguard: false, // Allow iframe embedding for AI Studio preview
   }));
 
   // 2. CORS Configuration
