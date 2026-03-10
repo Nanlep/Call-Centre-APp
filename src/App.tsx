@@ -964,6 +964,15 @@ const AutoDialerModal = ({ campaign, onClose, onCall }: { campaign: Campaign, on
               <div className="text-zinc-500">{contacts[currentIndex].phone}</div>
             </div>
 
+            {campaign.script && (
+              <div className="mb-6 p-4 bg-zinc-800/50 rounded-xl border border-zinc-700/50 max-h-48 overflow-y-auto">
+                <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Campaign Script</h4>
+                <div className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                  {campaign.script}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={handleDial}
@@ -1235,17 +1244,21 @@ export default function App() {
           <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Phone System</h2>
           <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} dialingNumber={dialingNumber} onDialComplete={() => setDialingNumber(null)} />
           
-          <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
-            <h3 className="text-sm font-medium text-zinc-400 mb-4">Active Scripts</h3>
-            <div className="space-y-3">
-              <div className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 cursor-pointer hover:bg-zinc-700 transition-colors">
-                <span className="block text-xs text-zinc-500 mb-1">Greeting</span>
-                "Hello, this is {user.name} from [Company]. How can I help you today?"
-              </div>
-              <div className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 cursor-pointer hover:bg-zinc-700 transition-colors">
-                <span className="block text-xs text-zinc-500 mb-1">Billing Inquiry</span>
-                "I can certainly help with that. Could you please verify your account number?"
-              </div>
+          <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50 flex flex-col overflow-hidden">
+            <h3 className="text-sm font-medium text-zinc-400 mb-4 shrink-0">Campaign Scripts</h3>
+            <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+              {campaigns.filter(c => c.script).length > 0 ? (
+                campaigns.filter(c => c.script).map(camp => (
+                  <div key={camp.id} className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 transition-colors">
+                    <span className="block text-xs text-indigo-400 mb-2 font-medium uppercase tracking-wider">{camp.name}</span>
+                    <div className="whitespace-pre-wrap leading-relaxed">{camp.script}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-zinc-500 text-sm text-center py-8 border border-dashed border-zinc-800 rounded-xl">
+                  No campaign scripts available.
+                </div>
+              )}
             </div>
           </div>
         </div>
