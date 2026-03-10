@@ -145,6 +145,23 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch campaigns');
     return res.json();
   },
+  createCampaign: async (data: { name: string; type: 'inbound' | 'outbound' }): Promise<{ success: boolean; id: number }> => {
+    const res = await fetch('/api/campaigns', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to create campaign');
+    return res.json();
+  },
+  deleteCampaign: async (id: number): Promise<{ success: boolean }> => {
+    const res = await fetch(`/api/campaigns/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error('Failed to delete campaign');
+    return res.json();
+  },
   updateCampaign: async (id: number, data: Partial<Campaign>): Promise<{ success: boolean }> => {
     const res = await fetch(`/api/campaigns/${id}`, {
       method: 'PUT',

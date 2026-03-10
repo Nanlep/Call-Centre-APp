@@ -402,6 +402,28 @@ async function startServer() {
     res.json(campaigns);
   });
 
+  app.post("/api/campaigns", authenticateToken, (req: any, res) => {
+    const { name, type } = req.body;
+    if (!name || !type) return res.status(400).json({ error: "Missing fields" });
+
+    const stmt = db.prepare("INSERT INTO campaigns (name, type, company_id) VALUES (?, ?, ?)");
+    const info = stmt.run(name, type, req.user.company_id);
+    res.json({ success: true, id: info.lastInsertRowid });
+  });
+
+  app.delete("/api/campaigns/:id", authenticateToken, (req: any, res) => {
+    const { id } = req.params;
+    const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ? AND company_id = ?").get(id, req.user.company_id);
+    if (!campaign) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+    
+    // Delete associated contacts first
+    db.prepare("DELETE FROM campaign_contacts WHERE campaign_id = ?").run(id);
+    db.prepare("DELETE FROM campaigns WHERE id = ?").run(id);
+    res.json({ success: true });
+  });
+
   app.put("/api/campaigns/:id", authenticateToken, (req: any, res) => {
     const { script } = req.body;
     const { id } = req.params;
