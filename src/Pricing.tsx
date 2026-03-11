@@ -51,19 +51,47 @@ const additionalCharges = [
   { service: 'Additional Storage (Call Recordings)', price: '$10 / month' },
 ];
 
-export const Pricing = () => {
+export const Pricing = ({ user, setUser }: { user?: any, setUser?: any }) => {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleSubscribe = (planName: string) => {
+  const handleSubscribe = async (planName: string) => {
+    if (!user) {
+      alert("Please sign in to subscribe.");
+      return;
+    }
+
     setSelectedPlan(planName);
-    // Simulate Interswitch payment modal
     setIsProcessing(true);
-    setTimeout(() => {
+    
+    try {
+      // Simulate Interswitch payment modal delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const res = await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}` // or rely on cookie
+        },
+        body: JSON.stringify({ plan: planName })
+      });
+      
+      if (res.ok) {
+        alert(`Successfully subscribed to ${planName} plan via Interswitch!`);
+        if (setUser) {
+          setUser({ ...user, subscription_status: 'active' });
+        }
+      } else {
+        alert("Subscription failed. Please try again.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Subscription failed.");
+    } finally {
       setIsProcessing(false);
-      alert(`Successfully subscribed to ${planName} plan via Interswitch!`);
       setSelectedPlan(null);
-    }, 2000);
+    }
   };
 
   return (

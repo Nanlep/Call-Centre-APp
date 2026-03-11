@@ -32,9 +32,17 @@ const runMigrations = () => {
       CREATE TABLE IF NOT EXISTS companies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
+        subscription_status TEXT DEFAULT 'inactive',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    try {
+      db.prepare("SELECT subscription_status FROM companies LIMIT 1").get();
+    } catch (e) {
+      console.log("Migrating companies table to add subscription_status...");
+      db.exec("ALTER TABLE companies ADD COLUMN subscription_status TEXT DEFAULT 'inactive'");
+    }
 
     // 2. Add company_id to users
     try {
@@ -273,7 +281,7 @@ async function startServer() {
       // Transaction to create company and user
       const transaction = db.transaction(() => {
         // 1. Create Company
-        const compStmt = db.prepare("INSERT INTO companies (name) VALUES (?)");
+        const compStmt = db.prepare("INSERT INTO companies (name, subscription_status) VALUES (?, 'inactive')");
         const compInfo = compStmt.run(companyName);
         const companyId = compInfo.lastInsertRowid;
 
@@ -289,7 +297,7 @@ async function startServer() {
       const token = jwt.sign({ id: userId, email, name, role: 'admin', company_id: companyId }, JWT_SECRET, { expiresIn: '8h' });
       
       res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-      res.json({ token, user: { id: userId, email, name, role: 'admin', company_id: companyId, company_name: companyName } });
+      res.json({ token, user: { id: userId, email, name, role: 'admin', company_id: companyId, company_name: companyName, subscription_status: 'inactive' } });
     } catch (err: any) {
       if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return res.status(400).json({ error: "Email already exists" });
@@ -302,7 +310,7 @@ async function startServer() {
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
     const user = db.prepare(`
-      SELECT u.*, c.name as company_name 
+      SELECT u.*, c.name as company_name, c.subscription_status 
       FROM users u 
       LEFT JOIN companies c ON u.company_id = c.id 
       WHERE u.email = ?
@@ -315,7 +323,7 @@ async function startServer() {
     const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role, company_id: user.company_id }, JWT_SECRET, { expiresIn: '8h' });
     
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, company_id: user.company_id, company_name: user.company_name } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, company_id: user.company_id, company_name: user.company_name, subscription_status: user.subscription_status } });
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -325,12 +333,25 @@ async function startServer() {
 
   app.get("/api/auth/me", authenticateToken, (req: any, res) => {
     const user = db.prepare(`
-      SELECT u.id, u.email, u.name, u.role, u.company_id, c.name as company_name 
+      SELECT u.id, u.email, u.name, u.role, u.company_id, c.name as company_name, c.subscription_status 
       FROM users u 
       LEFT JOIN companies c ON u.company_id = c.id 
       WHERE u.id = ?
     `).get(req.user.id);
     res.json({ user });
+  });
+
+  app.post("/api/subscribe", authenticateToken, (req: any, res) => {
+    const { plan } = req.body;
+    if (!plan) return res.status(400).json({ error: "Missing plan" });
+
+    try {
+      db.prepare("UPDATE companies SET subscription_status = 'active' WHERE id = ?").run(req.user.company_id);
+      res.json({ success: true, subscription_status: 'active' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Subscription failed" });
+    }
   });
 
   // Protected Routes
@@ -475,9 +496,97 @@ async function startServer() {
   });
 
   // --- WhatsApp Integration ---
+  app.post("/api/messages/broadcast", authenticateToken, requireAdmin, async (req: any, res) => {
+    const { prefix, count, body } = req.body;
+    
+    if (!prefix || !count || !body) {
+      return res.status(400).json({ error: "Missing 'prefix', 'count', or 'body'" });
+    }
+
+    const numCount = parseInt(count, 10);
+    if (isNaN(numCount) || numCount <= 0 || numCount > 250) {
+      return res.status(400).json({ error: "Count must be between 1 and 250 to prevent timeouts." });
+    }
+
+    const sanitizedPrefix = prefix.replace(/[^\d+]/g, '');
+    if (!sanitizedPrefix.startsWith('+')) {
+      return res.status(400).json({ error: "Prefix must start with a '+' and contain country code." });
+    }
+
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      return res.status(500).json({ error: "Twilio credentials are not configured on the server." });
+    }
+
+    try {
+      const twilioClient = Twilio(
+        process.env.TWILIO_ACCOUNT_SID,
+        process.env.TWILIO_AUTH_TOKEN
+      );
+      const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886";
+      
+      const results = [];
+      
+      // Use a transaction for database inserts to ensure data integrity
+      const insertContactAndLog = db.transaction((companyId, suffix, generatedNumber, msgBody, messageStatus, userId) => {
+        const stmt = db.prepare("INSERT INTO contacts (company_id, name, phone, status) VALUES (?, ?, ?, ?)");
+        const info = stmt.run(companyId, `Generated Contact ${suffix}`, generatedNumber, "new");
+        
+        const logStmt = db.prepare("INSERT INTO message_logs (contact_id, direction, body, status, agent_id) VALUES (?, ?, ?, ?, ?)");
+        logStmt.run(info.lastInsertRowid, "outbound", msgBody, messageStatus, userId);
+      });
+
+      // Process in batches to avoid rate limits and event loop blocking
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < numCount; i += BATCH_SIZE) {
+        const batch = [];
+        for (let j = 0; j < BATCH_SIZE && i + j < numCount; j++) {
+          const index = i + j;
+          const suffix = index.toString().padStart(4, '0');
+          const generatedNumber = `${sanitizedPrefix}${suffix}`;
+          const formattedTo = generatedNumber.startsWith("whatsapp:") ? generatedNumber : `whatsapp:${generatedNumber}`;
+          
+          batch.push(
+            twilioClient.messages.create({
+              body,
+              from: fromNumber,
+              to: formattedTo
+            })
+            .then(message => {
+              insertContactAndLog(req.user.company_id, suffix, generatedNumber, body, message.status, req.user.id);
+              return { phone: generatedNumber, status: "sent", sid: message.sid };
+            })
+            .catch(err => {
+              console.error(`Failed to send to ${generatedNumber}:`, err.message);
+              return { phone: generatedNumber, status: "failed", error: err.message };
+            })
+          );
+        }
+        
+        const batchResults = await Promise.all(batch);
+        results.push(...batchResults);
+        
+        // Small delay between batches to respect rate limits
+        if (i + BATCH_SIZE < numCount) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      
+      io.emit("contact_update");
+      io.emit("log_update");
+      res.json({ success: true, results });
+    } catch (error: any) {
+      console.error("WhatsApp broadcast error:", error);
+      res.status(500).json({ error: "Failed to run broadcast" });
+    }
+  });
+
   app.post("/api/messages/send", authenticateToken, async (req: any, res) => {
     const { to, body, contact_id } = req.body;
     if (!to || !body) return res.status(400).json({ error: "Missing 'to' or 'body'" });
+
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      return res.status(500).json({ error: "Twilio credentials are not configured on the server." });
+    }
 
     try {
       const twilioClient = Twilio(

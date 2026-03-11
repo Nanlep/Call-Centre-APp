@@ -9,6 +9,7 @@ export interface User {
   role: 'admin' | 'agent';
   company_id?: number;
   company_name?: string;
+  subscription_status?: string;
   created_at?: string;
 }
 

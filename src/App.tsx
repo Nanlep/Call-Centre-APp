@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play, MessageCircle, CreditCard, Megaphone } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, User, History, Users, Settings, Activity, LayoutGrid, LogOut, Lock, Mail, AlertTriangle, X, Play, MessageCircle, CreditCard, Megaphone, Radio } from 'lucide-react';
 import { api, socket, Contact, Campaign, CallLog, User as UserType } from './services';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { Pricing } from './Pricing';
 import { Campaigns } from './Campaigns';
+import { Broadcasts } from './Broadcasts';
 
 // --- Error Boundary ---
 export class ErrorBoundary extends Component<any, any> {
@@ -178,34 +179,51 @@ const AuthPage = ({ onLogin }: { onLogin: (u: UserType) => void }) => {
 
 // --- App Components ---
 
-const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void, user: UserType }) => (
-  <div className="w-16 bg-zinc-900 flex flex-col items-center py-6 gap-6 border-r border-zinc-800">
-    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
-      <Phone className="text-white w-6 h-6" />
-    </div>
-    <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-    <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
-    <NavIcon icon={<Megaphone />} active={activeTab === 'campaigns'} onClick={() => setActiveTab('campaigns')} />
-    <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-    <NavIcon icon={<CreditCard />} active={activeTab === 'pricing'} onClick={() => setActiveTab('pricing')} />
-    {user.role === 'admin' && (
-      <NavIcon icon={<User />} active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
-    )}
-    <div className="mt-auto flex flex-col gap-4">
-      <NavIcon icon={<Settings />} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-      <button
-        onClick={onLogout}
-        className="p-3 rounded-xl text-zinc-500 hover:text-red-400 hover:bg-zinc-800/50 transition-all"
-      >
-        <LogOut size={20} />
-      </button>
-    </div>
-  </div>
-);
+const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void, user: UserType }) => {
+  const isSubscribed = user.subscription_status === 'active';
 
-const NavIcon = ({ icon, active, onClick }: { icon: React.ReactNode, active: boolean, onClick: () => void }) => (
+  return (
+    <div className="w-16 bg-zinc-900 flex flex-col items-center py-6 gap-6 border-r border-zinc-800">
+      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
+        <Phone className="text-white w-6 h-6" />
+      </div>
+      
+      {isSubscribed ? (
+        <>
+          <NavIcon icon={<LayoutGrid />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} title="Dashboard" />
+          <NavIcon icon={<Users />} active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} title="Contacts" />
+          <NavIcon icon={<Megaphone />} active={activeTab === 'campaigns'} onClick={() => setActiveTab('campaigns')} title="Campaigns" />
+          <NavIcon icon={<History />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} title="Call History" />
+          <NavIcon icon={<CreditCard />} active={activeTab === 'pricing'} onClick={() => setActiveTab('pricing')} title="Pricing" />
+          {user.role === 'admin' && (
+            <>
+              <NavIcon icon={<User />} active={activeTab === 'team'} onClick={() => setActiveTab('team')} title="Team Management" />
+              <NavIcon icon={<Radio />} active={activeTab === 'broadcasts'} onClick={() => setActiveTab('broadcasts')} title="WhatsApp Broadcast" />
+            </>
+          )}
+        </>
+      ) : (
+        <NavIcon icon={<CreditCard />} active={activeTab === 'pricing'} onClick={() => setActiveTab('pricing')} title="Pricing" />
+      )}
+
+      <div className="mt-auto flex flex-col gap-4">
+        {isSubscribed && <NavIcon icon={<Settings />} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} title="Settings" />}
+        <button
+          onClick={onLogout}
+          title="Logout"
+          className="p-3 rounded-xl text-zinc-500 hover:text-red-400 hover:bg-zinc-800/50 transition-all"
+        >
+          <LogOut size={20} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const NavIcon = ({ icon, active, onClick, title }: { icon: React.ReactNode, active: boolean, onClick: () => void, title?: string }) => (
   <button
     onClick={onClick}
+    title={title}
     className={`p-3 rounded-xl transition-all ${active ? 'bg-zinc-800 text-white shadow-inner' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
   >
     {React.cloneElement(icon as React.ReactElement, { size: 20 })}
@@ -746,7 +764,7 @@ const LandingPage = ({ onGetStarted, onLogin }: { onGetStarted: () => void, onLo
                 onClick={onGetStarted}
                 className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-semibold text-lg transition-all shadow-xl shadow-indigo-500/20 hover:scale-105"
               >
-                Start Free Trial
+                Get started
               </button>
               <button 
                 onClick={() => setShowDemo(true)}
@@ -1030,7 +1048,7 @@ export default function App() {
 
   // Initialize Data (Only when logged in)
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.subscription_status !== 'active') return;
 
     const fetchData = async () => {
       try {
@@ -1053,14 +1071,25 @@ export default function App() {
       setLogs(l);
     });
 
+    socket.on('contact_update', async () => {
+      const c = await api.getContacts();
+      setContacts(c);
+    });
+
     return () => {
       socket.off('log_update');
+      socket.off('contact_update');
     };
   }, [user]);
 
   // Initialize Twilio (Only when logged in)
   useEffect(() => {
     if (!user) return;
+
+    if (user.subscription_status !== 'active') {
+      setActiveTab('pricing');
+      return;
+    }
 
     const initTwilio = async () => {
       try {
@@ -1161,8 +1190,9 @@ export default function App() {
             api.getCampaigns().then(setCampaigns);
           }} onDialCampaign={setActiveDialCampaign} />}
           {activeTab === 'history' && <CallHistory logs={logs} />}
-          {activeTab === 'pricing' && <Pricing />}
+          {activeTab === 'pricing' && <Pricing user={user} setUser={setUser} />}
           {activeTab === 'team' && user.role === 'admin' && <TeamManagement />}
+          {activeTab === 'broadcasts' && user.role === 'admin' && <Broadcasts />}
           {activeTab === 'settings' && (
             <div className="p-8">
               <h1 className="text-3xl font-semibold mb-4">Settings</h1>
@@ -1239,29 +1269,31 @@ export default function App() {
           )}
         </div>
 
-        {/* Right Panel - Always visible Dialer */}
-        <div className="w-96 bg-zinc-950 border-l border-zinc-800 p-6 flex flex-col gap-6">
-          <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Phone System</h2>
-          <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} dialingNumber={dialingNumber} onDialComplete={() => setDialingNumber(null)} />
-          
-          <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50 flex flex-col overflow-hidden">
-            <h3 className="text-sm font-medium text-zinc-400 mb-4 shrink-0">Campaign Scripts</h3>
-            <div className="space-y-3 overflow-y-auto flex-1 pr-2">
-              {campaigns.filter(c => c.script).length > 0 ? (
-                campaigns.filter(c => c.script).map(camp => (
-                  <div key={camp.id} className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 transition-colors">
-                    <span className="block text-xs text-indigo-400 mb-2 font-medium uppercase tracking-wider">{camp.name}</span>
-                    <div className="whitespace-pre-wrap leading-relaxed">{camp.script}</div>
+        {/* Right Panel - Always visible Dialer (only if subscribed) */}
+        {user.subscription_status === 'active' && (
+          <div className="w-96 bg-zinc-950 border-l border-zinc-800 p-6 flex flex-col gap-6">
+            <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Phone System</h2>
+            <Dialer device={device} activeCall={activeCall} setActiveCall={setActiveCall} contacts={contacts} number={number} setNumber={setNumber} dialingNumber={dialingNumber} onDialComplete={() => setDialingNumber(null)} />
+            
+            <div className="flex-1 bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50 flex flex-col overflow-hidden">
+              <h3 className="text-sm font-medium text-zinc-400 mb-4 shrink-0">Campaign Scripts</h3>
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+                {campaigns.filter(c => c.script).length > 0 ? (
+                  campaigns.filter(c => c.script).map(camp => (
+                    <div key={camp.id} className="p-3 bg-zinc-800 rounded-lg text-sm text-zinc-300 transition-colors">
+                      <span className="block text-xs text-indigo-400 mb-2 font-medium uppercase tracking-wider">{camp.name}</span>
+                      <div className="whitespace-pre-wrap leading-relaxed">{camp.script}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-zinc-500 text-sm text-center py-8 border border-dashed border-zinc-800 rounded-xl">
+                    No campaign scripts available.
                   </div>
-                ))
-              ) : (
-                <div className="text-zinc-500 text-sm text-center py-8 border border-dashed border-zinc-800 rounded-xl">
-                  No campaign scripts available.
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </main>
 
       {/* Incoming Call Modal */}
